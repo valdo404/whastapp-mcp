@@ -1,0 +1,129 @@
+[project]
+name = "whatsapp-mcp"
+version = "0.1.0"
+description = "MCP server for semantic search of WhatsApp conversations"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Laurent Valdes" }
+]
+keywords = ["whatsapp", "mcp", "semantic-search", "vector-database", "chat"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "pydantic>=2.0.0,<3",
+]
+
+[project.optional-dependencies]
+# Full MCP server with vector database support
+server = [
+    "fastmcp>=2.0.0,<3",
+    "pymilvus>=2.4.0",
+    "sentence-transformers>=2.2.0",
+]
+
+# Development dependencies
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+# All optional dependencies
+all = [
+    "whatsapp-mcp[server,dev]",
+]
+
+[project.scripts]
+whatsapp-mcp = "whatsapp_mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/laurentvaldes/whatsapp-mcp"
+Repository = "https://github.com/laurentvaldes/whatsapp-mcp"
+Documentation = "https://github.com/laurentvaldes/whatsapp-mcp#readme"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/whatsapp_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "W",      # pycodestyle warnings
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "DTZ",    # flake8-datetimez
+    "T10",    # flake8-debugger
+    "ISC",    # flake8-implicit-str-concat
+    "PIE",    # flake8-pie
+    "PT",     # flake8-pytest-style
+    "RSE",    # flake8-raise
+    "RET",    # flake8-return
+    "SIM",    # flake8-simplify
+    "TID",    # flake8-tidy-imports
+    "TCH",    # flake8-type-checking
+    "ARG",    # flake8-unused-arguments
+    "PGH",    # pygrep-hooks
+    "PL",     # pylint
+    "RUF",    # ruff-specific rules
+]
+ignore = [
+    "PLR0913",  # Too many arguments
+    "PLR2004",  # Magic value comparison
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["whatsapp_mcp"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_configs = true
+show_error_codes = true
+show_column_numbers = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = [
+    "sentence_transformers.*",
+    "pymilvus.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"

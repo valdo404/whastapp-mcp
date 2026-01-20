@@ -30,6 +30,7 @@ server = [
     "fastmcp>=2.0.0,<3",
     "pymilvus>=2.4.0",
     "sentence-transformers>=2.2.0",
+    "click>=8.0.0",
 ]
 
 # Development dependencies
@@ -47,6 +48,7 @@ all = [
 
 [project.scripts]
 whatsapp-mcp = "whatsapp_mcp.server:main"
+whatsapp-mcp-cli = "whatsapp_mcp.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/laurentvaldes/whatsapp-mcp"
@@ -118,6 +120,7 @@ pretty = true
 module = [
     "sentence_transformers.*",
     "pymilvus.*",
+    "click.*",
 ]
 ignore_missing_imports = true
 

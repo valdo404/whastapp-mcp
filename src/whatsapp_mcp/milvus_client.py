@@ -4,6 +4,7 @@ This module provides a client for interacting with Milvus vector database,
 including collection management, data insertion, and semantic search.
 """
 
+import hashlib
 import logging
 import os
 from datetime import datetime
@@ -22,6 +23,7 @@ DEFAULT_COLLECTION = "whatsapp_messages"
 # Schema field sizes
 MAX_CONTENT_LENGTH = 65535
 MAX_VARCHAR_LENGTH = 255
+HASH_LENGTH = 64  # SHA-256 hex digest length
 
 
 class MilvusClient:
@@ -109,6 +111,30 @@ class MilvusClient:
         self._collection = None
         logger.info("Disconnected from Milvus")
 
+    @staticmethod
+    def compute_message_hash(
+        timestamp: int,
+        sender: str,
+        chat_id: str,
+        content: str,
+    ) -> str:
+        """Compute a unique hash for a message based on its natural key.
+
+        The natural key consists of timestamp, sender, chat_id, and content.
+        This hash is used as the primary key for deduplication.
+
+        Args:
+            timestamp: Message timestamp (Unix epoch seconds).
+            sender: Name of the message sender.
+            chat_id: Unique identifier for the conversation.
+            content: Message text content.
+
+        Returns:
+            A 64-character hex string (SHA-256 hash).
+        """
+        key = f"{timestamp}|{sender}|{chat_id}|{content}"
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
     def ensure_collection(self, dimension: int = DEFAULT_DIMENSION) -> None:
         """Ensure the collection exists with the correct schema.
 
@@ -131,13 +157,15 @@ class MilvusClient:
         logger.info("Creating collection '%s'", self.collection_name)
 
         # Define schema fields
+        # Using message_hash as primary key for deduplication (no auto_id)
         fields = [
             FieldSchema(
-                name="id",
-                dtype=DataType.INT64,
+                name="message_hash",
+                dtype=DataType.VARCHAR,
+                max_length=HASH_LENGTH,
                 is_primary=True,
-                auto_id=True,
-                description="Auto-generated message ID",
+                auto_id=False,
+                description="SHA-256 hash of (timestamp|sender|chat_id|content) for deduplication",
             ),
             FieldSchema(
                 name="content",
@@ -258,14 +286,17 @@ class MilvusClient:
         messages: list[Message],
         embeddings: list[list[float]],
     ) -> int:
-        """Insert messages with their embeddings into the collection.
+        """Insert or update messages with their embeddings into the collection.
+
+        Uses upsert to handle deduplication based on message_hash (natural key).
+        If a message with the same hash already exists, it will be updated.
 
         Args:
             messages: List of Message objects to insert.
             embeddings: List of embedding vectors corresponding to the messages.
 
         Returns:
-            Number of entities inserted.
+            Number of entities upserted.
 
         Raises:
             ValueError: If the number of messages and embeddings don't match.
@@ -281,21 +312,34 @@ class MilvusClient:
 
         self.ensure_collection()
 
-        # Prepare data for insertion as list of lists (column-based format)
-        # Order must match schema: content, sender, timestamp, chat_id, chat_name, embedding
+        # Compute message hashes for deduplication
+        timestamps = [int(msg.timestamp.timestamp()) for msg in messages]
+        senders = [msg.sender[:MAX_VARCHAR_LENGTH] for msg in messages]
+        chat_ids = [msg.chat_id[:MAX_VARCHAR_LENGTH] for msg in messages]
+        contents = [self._truncate_content(msg.content) for msg in messages]
+
+        message_hashes = [
+            self.compute_message_hash(ts, sender, chat_id, content)
+            for ts, sender, chat_id, content in zip(timestamps, senders, chat_ids, contents)
+        ]
+
+        # Prepare data for upsert as list of lists (column-based format)
+        # Order must match schema: message_hash, content, sender, timestamp, chat_id, chat_name, embedding
         data = [
-            [self._truncate_content(msg.content) for msg in messages],
-            [msg.sender[:MAX_VARCHAR_LENGTH] for msg in messages],
-            [int(msg.timestamp.timestamp()) for msg in messages],
-            [msg.chat_id[:MAX_VARCHAR_LENGTH] for msg in messages],
+            message_hashes,
+            contents,
+            senders,
+            timestamps,
+            chat_ids,
             [msg.chat_name[:MAX_VARCHAR_LENGTH] for msg in messages],
             embeddings,
         ]
 
         if self._collection is not None:
-            result = self._collection.insert(data)
-            logger.debug("Inserted %d messages", len(messages))
-            return int(result.insert_count)
+            # Use upsert for deduplication - if hash exists, update; otherwise insert
+            result = self._collection.upsert(data)
+            logger.debug("Upserted %d messages", len(messages))
+            return int(result.upsert_count)
 
         return 0
 
@@ -515,48 +559,63 @@ class MilvusClient:
         if self._collection is None:
             return []
 
-        # Use query iterator to handle large collections
-        # First, get a sample to find unique chat_ids
-        sample_results = self._collection.query(
-            expr="",
-            output_fields=["chat_id", "chat_name"],
-            limit=16384,
-        )
-
-        # Get unique chat_ids from sample
+        # Use query iterator to handle large collections efficiently
+        # First, collect all unique chat_ids and their names using iterator
         chat_ids = set()
         chat_names: dict[str, str] = {}
-        for r in sample_results:
-            chat_id = r.get("chat_id")
-            chat_ids.add(chat_id)
-            if chat_id not in chat_names:
-                chat_names[chat_id] = r.get("chat_name", "")
+        
+        # Use query_iterator to bypass the 16384 limit
+        iterator = self._collection.query_iterator(
+            expr="",
+            output_fields=["chat_id", "chat_name"],
+            batch_size=5000,
+        )
+        
+        while True:
+            batch_results = iterator.next()
+            if not batch_results:
+                break
+                
+            for r in batch_results:
+                chat_id = r.get("chat_id")
+                chat_ids.add(chat_id)
+                if chat_id not in chat_names:
+                    chat_names[chat_id] = r.get("chat_name", "")
+        
+        iterator.close()
 
-        # For each chat_id, get statistics
+        # For each chat_id, get statistics using query iterator
         chats: list[dict[str, Any]] = []
         for chat_id in chat_ids:
-            # Get messages for this chat
-            chat_results = self._collection.query(
-                expr=f'chat_id == "{chat_id}"',
-                output_fields=["sender", "timestamp"],
-                limit=16384,
-            )
-
-            if not chat_results:
-                continue
-
             participants: set[str] = set()
             timestamps: list[int] = []
-
-            for r in chat_results:
-                participants.add(r.get("sender", ""))
-                timestamps.append(r.get("timestamp", 0))
+            total_count = 0
+            
+            # Use query_iterator for each chat
+            chat_iterator = self._collection.query_iterator(
+                expr=f'chat_id == "{chat_id}"',
+                output_fields=["sender", "timestamp"],
+                batch_size=5000,
+            )
+            
+            while True:
+                chat_results = chat_iterator.next()
+                if not chat_results:
+                    break
+                
+                total_count += len(chat_results)
+                
+                for r in chat_results:
+                    participants.add(r.get("sender", ""))
+                    timestamps.append(r.get("timestamp", 0))
+            
+            chat_iterator.close()
 
             if timestamps:
                 chats.append({
                     "chat_id": chat_id,
                     "chat_name": chat_names.get(chat_id, ""),
-                    "message_count": len(chat_results),
+                    "message_count": total_count,
                     "participants": list(participants),
                     "date_range": {
                         "first": datetime.fromtimestamp(min(timestamps)).isoformat(),

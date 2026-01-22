@@ -25,6 +25,9 @@ __all__ = [
     # Milvus client (lazy import to avoid loading heavy dependencies)
     "MilvusClient",
     "get_milvus_client",
+    # Server (lazy import to avoid loading heavy dependencies)
+    "mcp",
+    "main",
 ]
 
 
@@ -58,6 +61,14 @@ def __getattr__(name: str) -> Any:
         return {
             "MilvusClient": MilvusClient,
             "get_milvus_client": get_milvus_client,
+        }[name]
+
+    if name in ("mcp", "main"):
+        from whatsapp_mcp.server import main, mcp
+
+        return {
+            "mcp": mcp,
+            "main": main,
         }[name]
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

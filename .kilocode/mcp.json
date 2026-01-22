@@ -1,0 +1,1 @@
+{"mcpServers":{"whatsapp":{"command":"/Users/laurentvaldes/Projects/whatsapp-mcp/.venv/bin/whatsapp-mcp","args":[],"env":{"MILVUS_HOST":"localhost","MILVUS_PORT":"19530"},"disabled":false,"alwaysAllow":["get_chat_stats","list_chats","semantic_search","search_by_date"],"disabledTools":[]}}}

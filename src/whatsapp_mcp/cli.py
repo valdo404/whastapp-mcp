@@ -377,6 +377,115 @@ def search(
         click.echo()
 
 
+@cli.command("search-by-date")
+@click.argument("start_date")
+@click.argument("end_date")
+@click.option(
+    "--query",
+    default=None,
+    help="Optional semantic search query to filter and rank results.",
+)
+@click.option(
+    "--limit",
+    default=50,
+    help="Maximum number of results.",
+    show_default=True,
+)
+@click.option(
+    "--chat-id",
+    default=None,
+    help="Filter by chat ID.",
+)
+@click.option(
+    "--milvus-host",
+    default=None,
+    envvar="MILVUS_HOST",
+    help="Milvus server hostname.",
+)
+@click.option(
+    "--milvus-port",
+    default=None,
+    type=int,
+    envvar="MILVUS_PORT",
+    help="Milvus server port.",
+)
+@click.option(
+    "--model",
+    default=None,
+    envvar="EMBEDDING_MODEL",
+    help="Sentence-transformers model name (only used if --query is provided).",
+)
+def search_by_date_cmd(
+    start_date: str,
+    end_date: str,
+    query: str | None,
+    limit: int,
+    chat_id: str | None,
+    milvus_host: str | None,
+    milvus_port: int | None,
+    model: str | None,
+) -> None:
+    """Get messages within a date range.
+
+    START_DATE: Start date in ISO format (YYYY-MM-DD)
+    END_DATE: End date in ISO format (YYYY-MM-DD)
+
+    Example:
+        whatsapp-mcp-cli search-by-date 2025-01-01 2025-01-31
+        whatsapp-mcp-cli search-by-date 2025-01-01 2025-01-31 --limit 100
+        whatsapp-mcp-cli search-by-date 2025-01-01 2025-01-31 --query "vacation"
+    """
+    from datetime import datetime
+
+    # Parse dates
+    try:
+        start_dt = datetime.fromisoformat(start_date)
+        end_dt = datetime.fromisoformat(end_date)
+    except ValueError as e:
+        click.echo(f"Invalid date format. Use YYYY-MM-DD. Error: {e}", err=True)
+        sys.exit(1)
+
+    milvus_client = MilvusClient(host=milvus_host, port=milvus_port)
+
+    try:
+        milvus_client.load_collection()
+    except ConnectionError as e:
+        click.echo(f"Error connecting to Milvus: {e}", err=True)
+        sys.exit(1)
+
+    # Generate query embedding if query provided
+    query_embedding = None
+    if query:
+        click.echo(f"Searching with semantic query: {query}")
+        embedding_service = EmbeddingService(model_name=model)
+        query_embedding = embedding_service.encode(query)
+
+    click.echo(f"Date range: {start_date} to {end_date}")
+
+    # Search
+    results = milvus_client.search_by_date(
+        start_date=start_dt,
+        end_date=end_dt,
+        query_embedding=query_embedding,
+        chat_id=chat_id,
+        limit=limit,
+    )
+
+    if not results:
+        click.echo("No results found.")
+        return
+
+    click.echo(f"\nFound {len(results)} message(s):\n")
+
+    for i, result in enumerate(results, 1):
+        timestamp = datetime.fromtimestamp(result["timestamp"])
+        score_str = f"[{result['score']:.4f}] " if result.get("score") else ""
+        click.echo(f"{i}. {score_str}{result['chat_name']}")
+        click.echo(f"   {result['sender']} - {timestamp.strftime('%Y-%m-%d %H:%M')}")
+        click.echo(f"   {result['content'][:100]}{'...' if len(result['content']) > 100 else ''}")
+        click.echo()
+
+
 @cli.command()
 @click.option(
     "--milvus-host",

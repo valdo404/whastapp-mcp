@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "whatsapp": {
+      "command": "/path/to/whatsapp-mcp/.venv/bin/whatsapp-mcp",
+      "args": [],
+      "env": {
+        "MILVUS_HOST": "localhost",
+        "MILVUS_PORT": "19530"
+      }
+    }
+  }
+}

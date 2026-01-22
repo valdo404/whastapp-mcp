@@ -356,16 +356,20 @@ def search(
     click.echo(f"Searching for: {query}")
     query_embedding = embedding_service.encode(query)
 
-    # Search
-    results = milvus_client.search(
+    # Search - get more results to allow proper sorting, then limit
+    # We get 10x the limit to ensure we have enough for proper chronological ordering
+    raw_results = milvus_client.search(
         query_embedding=query_embedding,
-        limit=limit,
+        limit=min(limit * 10, 5000),  # Cap at 5000 to avoid performance issues
         chat_id=chat_id,
     )
 
-    if not results:
+    if not raw_results:
         click.echo("No results found.")
         return
+
+    # Sort by timestamp (chronological order) FIRST, then apply limit
+    results = sorted(raw_results, key=lambda r: r.get("timestamp", 0))[:limit]
 
     click.echo(f"\nFound {len(results)} result(s):\n")
 
@@ -474,6 +478,9 @@ def search_by_date_cmd(
     if not results:
         click.echo("No results found.")
         return
+
+    # Sort by timestamp (chronological order)
+    results = sorted(results, key=lambda r: r.get("timestamp", 0))
 
     click.echo(f"\nFound {len(results)} message(s):\n")
 

@@ -400,9 +400,10 @@ class MilvusClient:
         expr = " and ".join(filters) if filters else None
 
         # Search parameters
+        # ef must be >= limit for HNSW search to work
         search_params = {
             "metric_type": "COSINE",
-            "params": {"ef": 64},  # Search-time accuracy
+            "params": {"ef": max(64, limit)},  # Search-time accuracy, must be >= limit
         }
 
         if self._collection is None:
@@ -448,21 +449,26 @@ class MilvusClient:
             limit: Maximum number of results.
 
         Returns:
-            List of messages within the date range.
+            List of messages within the date range, sorted chronologically.
         """
         start_ts = int(start_date.timestamp())
         end_ts = int(end_date.timestamp())
 
         if query_embedding:
-            return self.search(
+            # For semantic search, we need to get more results, sort, then limit
+            # Get 10x the limit to ensure we have enough for proper ordering
+            raw_results = self.search(
                 query_embedding=query_embedding,
-                limit=limit,
+                limit=min(limit * 10, 5000),  # Cap at 5000 to avoid performance issues
                 chat_id=chat_id,
                 start_timestamp=start_ts,
                 end_timestamp=end_ts,
             )
+            # Sort by timestamp and apply limit
+            sorted_results = sorted(raw_results, key=lambda r: r.get("timestamp", 0))
+            return sorted_results[:limit]
 
-        # Query without semantic search
+        # Query without semantic search - use iterator to get all results, then sort and limit
         self.load_collection()
 
         filters = [f"timestamp >= {start_ts}", f"timestamp <= {end_ts}"]
@@ -474,11 +480,25 @@ class MilvusClient:
         if self._collection is None:
             return []
 
-        results = self._collection.query(
+        # Use query_iterator to get ALL matching results, then sort and limit
+        all_results: list[dict[str, Any]] = []
+        iterator = self._collection.query_iterator(
             expr=expr,
             output_fields=["content", "sender", "timestamp", "chat_id", "chat_name"],
-            limit=limit,
+            batch_size=1000,
         )
+        
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            all_results.extend(batch)
+        
+        iterator.close()
+
+        # Sort by timestamp (chronological order) FIRST, then apply limit
+        sorted_results = sorted(all_results, key=lambda r: r.get("timestamp", 0))
+        limited_results = sorted_results[:limit]
 
         return [
             {
@@ -489,7 +509,7 @@ class MilvusClient:
                 "chat_name": r.get("chat_name"),
                 "score": None,
             }
-            for r in results
+            for r in limited_results
         ]
 
     def search_by_sender(
@@ -508,17 +528,21 @@ class MilvusClient:
             limit: Maximum number of results.
 
         Returns:
-            List of messages from the specified sender.
+            List of messages from the specified sender, sorted chronologically.
         """
         if query_embedding:
-            return self.search(
+            # For semantic search, we need to get more results, sort, then limit
+            raw_results = self.search(
                 query_embedding=query_embedding,
-                limit=limit,
+                limit=min(limit * 10, 5000),  # Cap at 5000 to avoid performance issues
                 chat_id=chat_id,
                 sender=sender,
             )
+            # Sort by timestamp and apply limit
+            sorted_results = sorted(raw_results, key=lambda r: r.get("timestamp", 0))
+            return sorted_results[:limit]
 
-        # Query without semantic search
+        # Query without semantic search - use iterator to get all results, then sort and limit
         self.load_collection()
 
         filters = [f'sender == "{sender}"']
@@ -530,11 +554,25 @@ class MilvusClient:
         if self._collection is None:
             return []
 
-        results = self._collection.query(
+        # Use query_iterator to get ALL matching results, then sort and limit
+        all_results: list[dict[str, Any]] = []
+        iterator = self._collection.query_iterator(
             expr=expr,
             output_fields=["content", "sender", "timestamp", "chat_id", "chat_name"],
-            limit=limit,
+            batch_size=1000,
         )
+        
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            all_results.extend(batch)
+        
+        iterator.close()
+
+        # Sort by timestamp (chronological order) FIRST, then apply limit
+        sorted_results = sorted(all_results, key=lambda r: r.get("timestamp", 0))
+        limited_results = sorted_results[:limit]
 
         return [
             {
@@ -545,7 +583,7 @@ class MilvusClient:
                 "chat_name": r.get("chat_name"),
                 "score": None,
             }
-            for r in results
+            for r in limited_results
         ]
 
     def list_chats(self) -> list[dict[str, Any]]:

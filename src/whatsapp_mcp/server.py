@@ -106,17 +106,29 @@ def _format_timestamp(timestamp: int | None) -> str | None:
 
 
 def _format_search_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Format search results for AI assistant consumption."""
+    """Format search results for AI assistant consumption.
+    
+    Results are always sorted by timestamp (chronological order).
+    """
     formatted = []
     for result in results:
         formatted.append({
             "content": result.get("content"),
             "sender": result.get("sender"),
             "timestamp": _format_timestamp(result.get("timestamp")),
+            "raw_timestamp": result.get("timestamp"),  # Keep for sorting
             "chat_id": result.get("chat_id"),
             "chat_name": result.get("chat_name"),
             "relevance_score": result.get("score"),
         })
+    
+    # Sort by timestamp (chronological order)
+    formatted.sort(key=lambda x: x.get("raw_timestamp") or 0)
+    
+    # Remove raw_timestamp from output
+    for item in formatted:
+        del item["raw_timestamp"]
+    
     return formatted
 
 
@@ -134,7 +146,7 @@ def semantic_search(
     Args:
         query: Natural language search query.
                Examples: "vacation plans", "birthday party", "work meeting"
-        limit: Maximum number of results to return (1-50, default: 10)
+        limit: Maximum number of results to return (1-500, default: 10)
         chat_id: Optional chat ID to limit search to a specific conversation.
                  Use list_chats() to see available chat IDs.
 
@@ -160,7 +172,7 @@ def semantic_search(
         }
 
     # Enforce limits
-    limit = max(1, min(limit, 50))
+    limit = max(1, min(limit, 500))
 
     try:
         # Generate query embedding
@@ -233,7 +245,7 @@ def search_by_date(
         }
 
     # Enforce limits
-    limit = max(1, min(limit, 100))
+    limit = max(1, min(limit, 500))
 
     try:
         # Generate query embedding if query provided
@@ -303,7 +315,7 @@ def search_by_sender(
         }
 
     # Enforce limits
-    limit = max(1, min(limit, 100))
+    limit = max(1, min(limit, 500))
 
     try:
         # Generate query embedding if query provided
